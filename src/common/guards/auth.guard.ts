@@ -2,6 +2,7 @@
 
 import { Injectable, CanActivate, ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { UserRole } from '../../../shared/types';
+import { SupabaseService } from '../supabase/supabase.service';
 
 export interface AuthenticatedUserContext {
   id: string;
@@ -10,50 +11,44 @@ export interface AuthenticatedUserContext {
   email: string;
 }
 
+/**
+ * Verifies the Supabase access token (Authorization: Bearer <jwt>) and loads the
+ * caller's tenant and role from the `users` table. Identity is never taken from headers.
+ */
 @Injectable()
 export class AuthGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
+  constructor(private readonly supabase: SupabaseService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
-    const authHeader = request.headers['authorization'];
+    const header: string | undefined = request.headers['authorization'];
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      const mockTenantId = request.headers['x-tenant-id'] || 'tenant-123';
-      const mockUserId = request.headers['x-user-id'] || 'user-123';
-      const mockRole = (request.headers['x-user-role'] as UserRole) || 'EMPLOYEE';
-      const mockEmail = request.headers['x-user-email'] || 'employee@empflow.com';
-
-      request.user = {
-        id: mockUserId,
-        tenantId: mockTenantId,
-        role: mockRole,
-        email: mockEmail,
-      } as AuthenticatedUserContext;
-      return true;
+    if (!header || !header.startsWith('Bearer ')) {
+      throw new UnauthorizedException('Missing bearer token');
     }
 
-    const token = authHeader.split(' ')[1];
-    
-    try {
-      const payloadBase64 = token.split('.')[1];
-      if (payloadBase64) {
-        const decoded = JSON.parse(Buffer.from(payloadBase64, 'base64').toString('utf-8'));
-        request.user = {
-          id: decoded.sub || decoded.user_id || 'user-123',
-          tenantId: decoded.app_metadata?.tenantId || decoded.user_metadata?.tenantId || 'tenant-123',
-          role: decoded.app_metadata?.role || decoded.user_metadata?.role || 'EMPLOYEE',
-          email: decoded.email || 'employee@empflow.com',
-        };
-      } else {
-        request.user = {
-          id: 'user-123',
-          tenantId: 'tenant-123',
-          role: 'EMPLOYEE',
-          email: 'employee@empflow.com',
-        };
-      }
-      return true;
-    } catch (e) {
+    const token = header.slice('Bearer '.length).trim();
+    const { data: auth, error } = await this.supabase.client.auth.getUser(token);
+    if (error || !auth?.user) {
       throw new UnauthorizedException('Invalid or expired authentication token');
     }
+
+    const { data: profile } = await this.supabase.client
+      .from('users')
+      .select('id, tenant_id, role, email')
+      .eq('id', auth.user.id)
+      .maybeSingle();
+
+    if (!profile) {
+      throw new UnauthorizedException('No employee profile is linked to this account');
+    }
+
+    request.user = {
+      id: profile.id,
+      tenantId: profile.tenant_id,
+      role: profile.role,
+      email: profile.email,
+    } as AuthenticatedUserContext;
+    return true;
   }
 }

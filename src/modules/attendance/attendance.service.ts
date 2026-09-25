@@ -1,103 +1,65 @@
 // backend/src/modules/attendance/attendance.service.ts
 
-import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { Attendance, Tenant } from '../../../shared/types';
+import { Injectable, ForbiddenException, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Attendance } from '../../../shared/types';
+import { DatabaseAttendanceRow } from '../../../shared/schemas/db';
 import { isWithinGeofence } from '../../../shared/utils/haversine';
-
-const mockTenantsStore: Record<string, Tenant> = {
-  'tenant-123': {
-    id: 'tenant-123',
-    name: 'Acme Corp',
-    officeLat: 17.6868,
-    officeLng: 83.2185,
-    radius: 200,
-    timezone: 'Asia/Kolkata',
-  },
-};
-
-const mockAttendanceStore: Attendance[] = [];
+import { SupabaseService, unwrap } from '../../common/supabase/supabase.service';
+import { toAttendance } from '../../common/supabase/mappers';
 
 @Injectable()
 export class AttendanceService {
-  async clockIn(
-    userId: string,
-    tenantId: string,
-    lat: number,
-    lng: number,
-    timestamp?: string
-  ): Promise<Attendance> {
-    const tenant = mockTenantsStore[tenantId] || {
-      id: tenantId,
-      name: 'Default Org',
-      officeLat: 17.6868,
-      officeLng: 83.2185,
-      radius: 200,
-      timezone: 'UTC',
-    };
+  constructor(private readonly supabase: SupabaseService) {}
 
-    const geofenceCheck = isWithinGeofence(
-      lat,
-      lng,
-      tenant.officeLat,
-      tenant.officeLng,
-      tenant.radius
-    );
+  async clockIn(userId: string, tenantId: string, lat: number, lng: number, timestamp?: string): Promise<Attendance> {
+    const { data: tenant, error: tenantError } = await this.supabase.client
+      .from('tenants')
+      .select('office_lat, office_lng, radius')
+      .eq('id', tenantId)
+      .maybeSingle();
+    if (tenantError || !tenant) throw new NotFoundException('Organization not found');
 
-    if (!geofenceCheck.isInside) {
+    const geofence = isWithinGeofence(lat, lng, tenant.office_lat, tenant.office_lng, tenant.radius);
+    if (!geofence.isInside) {
       throw new ForbiddenException({
         code: 'ERR_OUT_OF_BOUNDS',
-        message: `You must be within ${tenant.radius}m of the office. Current distance: ${geofenceCheck.distanceMeters}m`,
+        message: `You must be within ${tenant.radius}m of the office. Current distance: ${geofence.distanceMeters}m`,
       });
     }
 
-    const existingOpenShift = mockAttendanceStore.find(
-      (a) => a.userId === userId && a.tenantId === tenantId && !a.punchOut
-    );
+    const open = await this.findOpenShift(userId, tenantId);
+    if (open) return open;
 
-    if (existingOpenShift) {
-      return existingOpenShift;
-    }
-
-    const newRecord: Attendance = {
-      id: `att-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      userId,
-      tenantId,
-      punchIn: timestamp || new Date().toISOString(),
-      status: 'PRESENT',
-      lat,
-      lng,
-    };
-
-    mockAttendanceStore.push(newRecord);
-    return newRecord;
+    const { data, error } = await this.supabase.client
+      .from('attendance')
+      .insert({
+        user_id: userId,
+        tenant_id: tenantId,
+        punch_in: timestamp || new Date().toISOString(),
+        status: 'PRESENT',
+        lat,
+        lng,
+      })
+      .select('*')
+      .single();
+    if (error) throw new BadRequestException(error.message);
+    return toAttendance(data as DatabaseAttendanceRow);
   }
 
-  async clockOut(
-    userId: string,
-    tenantId: string,
-    lat: number,
-    lng: number,
-    timestamp?: string
-  ): Promise<Attendance> {
-    const openRecord = mockAttendanceStore.find(
-      (a) => a.userId === userId && a.tenantId === tenantId && !a.punchOut
-    );
-
-    if (!openRecord) {
-      throw new NotFoundException({
-        code: 'ERR_NO_OPEN_SHIFT',
-        message: 'No active shift found to clock out.',
-      });
+  async clockOut(userId: string, tenantId: string, _lat: number, _lng: number, timestamp?: string): Promise<Attendance> {
+    const open = await this.findOpenShift(userId, tenantId);
+    if (!open) {
+      throw new NotFoundException({ code: 'ERR_NO_OPEN_SHIFT', message: 'No active shift found to clock out.' });
     }
-
-    openRecord.punchOut = timestamp || new Date().toISOString();
-    return openRecord;
+    return this.updateRecord(open.id, tenantId, { punch_out: timestamp || new Date().toISOString() });
   }
 
+  /** userId === 'all' returns every record in the tenant. Newest first. */
   async getAttendanceHistory(userId: string, tenantId: string): Promise<Attendance[]> {
-    return mockAttendanceStore.filter(
-      (a) => a.tenantId === tenantId && (a.userId === userId || userId === 'all')
-    );
+    let query = this.supabase.client.from('attendance').select('*').eq('tenant_id', tenantId);
+    if (userId !== 'all') query = query.eq('user_id', userId);
+    const rows = unwrap(await query.order('punch_in', { ascending: false })) as DatabaseAttendanceRow[];
+    return rows.map(toAttendance);
   }
 
   async regularizeMissedPunch(
@@ -106,19 +68,50 @@ export class AttendanceService {
     punchIn?: string,
     punchOut?: string
   ): Promise<Attendance> {
-    const record = mockAttendanceStore.find((a) => a.id === attendanceId && a.tenantId === tenantId);
+    const patch: Record<string, unknown> = { status: 'REGULARIZED' };
+    if (punchIn) patch.punch_in = punchIn;
+    if (punchOut) patch.punch_out = punchOut;
+    return this.updateRecord(attendanceId, tenantId, patch, {
+      code: 'ERR_ATTENDANCE_NOT_FOUND',
+      message: 'Attendance record not found for regularization',
+    });
+  }
 
-    if (!record) {
-      throw new NotFoundException({
-        code: 'ERR_ATTENDANCE_NOT_FOUND',
-        message: 'Attendance record not found for regularization',
-      });
-    }
+  /** Used by the end-of-day worker: closes a forgotten shift and flags it as an anomaly. */
+  async closeAsMissedPunch(attendanceId: string, tenantId: string): Promise<Attendance> {
+    return this.updateRecord(attendanceId, tenantId, {
+      punch_out: new Date().toISOString(),
+      status: 'ANOMALY_MISSED_PUNCH',
+    });
+  }
 
-    if (punchIn) record.punchIn = punchIn;
-    if (punchOut) record.punchOut = punchOut;
-    record.status = 'REGULARIZED';
+  private async findOpenShift(userId: string, tenantId: string): Promise<Attendance | null> {
+    const { data, error } = await this.supabase.client
+      .from('attendance')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('tenant_id', tenantId)
+      .is('punch_out', null)
+      .maybeSingle();
+    if (error) throw new BadRequestException(error.message);
+    return data ? toAttendance(data as DatabaseAttendanceRow) : null;
+  }
 
-    return record;
+  private async updateRecord(
+    id: string,
+    tenantId: string,
+    patch: Record<string, unknown>,
+    notFound: object = { code: 'ERR_ATTENDANCE_NOT_FOUND', message: 'Attendance record not found' }
+  ): Promise<Attendance> {
+    const { data, error } = await this.supabase.client
+      .from('attendance')
+      .update(patch)
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .select('*')
+      .maybeSingle();
+    if (error) throw new BadRequestException(error.message);
+    if (!data) throw new NotFoundException(notFound);
+    return toAttendance(data as DatabaseAttendanceRow);
   }
 }

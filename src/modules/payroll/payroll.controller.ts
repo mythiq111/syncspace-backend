@@ -34,13 +34,11 @@ export class PayrollController {
   @Roles('HR_MANAGER', 'TENANT_ADMIN', 'SUPER_ADMIN')
   async runBatchPayroll(
     @Req() req: { user: AuthenticatedUserContext },
-    @Body() body: { month: string; employees: any[] }
+    @Body() body: { month: string; employees?: any[] }
   ): Promise<ApiResponse<any>> {
-    const payslips = await this.payrollService.generateMonthlyBatchPayroll(
-      req.user.tenantId,
-      body.month,
-      body.employees
-    );
+    const payslips = body.employees
+      ? await this.payrollService.generateMonthlyBatchPayroll(req.user.tenantId, body.month, body.employees)
+      : await this.payrollService.runMonthlyPayroll(req.user.tenantId, body.month);
 
     return { data: payslips };
   }

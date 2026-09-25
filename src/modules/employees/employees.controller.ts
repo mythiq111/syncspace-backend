@@ -1,6 +1,6 @@
 // backend/src/modules/employees/employees.controller.ts
 
-import { Controller, Post, Get, Body, Req, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Param, Body, Req, UseGuards } from '@nestjs/common';
 import { EmployeesService } from './employees.service';
 import { AuthGuard, AuthenticatedUserContext } from '../../common/guards/auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -28,7 +28,7 @@ export class EmployeesController {
   @Roles('TENANT_ADMIN', 'HR_MANAGER', 'SUPER_ADMIN')
   async inviteEmployee(
     @Req() req: { user: AuthenticatedUserContext },
-    @Body() body: { email: string; name: string; role: UserRole; managerId?: string; baseSalary?: number }
+    @Body() body: { email: string; name: string; role: UserRole; managerId?: string; baseSalary?: number; allowances?: number; deductions?: number; password?: string }
   ): Promise<ApiResponse<User>> {
     const created = await this.employeesService.inviteEmployee(
       req.user.tenantId,
@@ -36,8 +36,30 @@ export class EmployeesController {
       body.name,
       body.role,
       body.managerId,
-      body.baseSalary
+      body.baseSalary,
+      body.allowances,
+      body.deductions,
+      body.password
     );
     return { data: created };
+  }
+
+  @Patch(":id")
+  @Roles("TENANT_ADMIN", "HR_MANAGER", "SUPER_ADMIN")
+  async updateEmployee(
+    @Req() req: { user: AuthenticatedUserContext },
+    @Param("id") id: string,
+    @Body() body: Partial<User>
+  ): Promise<ApiResponse<User>> {
+    const updated = await this.employeesService.updateEmployee(id, req.user.tenantId, {
+      name: body.name,
+      role: body.role,
+      managerId: body.managerId,
+      baseSalary: body.baseSalary,
+      allowances: body.allowances,
+      deductions: body.deductions,
+      annualLeaveBalance: body.annualLeaveBalance,
+    });
+    return { data: updated };
   }
 }

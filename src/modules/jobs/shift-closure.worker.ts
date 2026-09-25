@@ -26,8 +26,7 @@ export class ShiftClosureWorker {
 
     let closedCount = 0;
     for (const record of unclosedPunches) {
-      record.punchOut = new Date().toISOString();
-      record.status = 'ANOMALY_MISSED_PUNCH';
+      await this.attendanceService.closeAsMissedPunch(record.id, jobData.tenantId);
       closedCount++;
 
       await this.notificationsService.notifyMissedPunchAlert(record.userId);
