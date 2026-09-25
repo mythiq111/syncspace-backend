@@ -17,9 +17,9 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
   CREATE TYPE leave_status      AS ENUM ('PENDING', 'MANAGER_APPROVED', 'HR_APPROVED', 'REJECTED');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
+--sgfdfv
 -- =====================================================================
--- 2. Shared trigger: keep updated_at fresh
+-- 2. Shared trigger: keep updated_at fresh gfverdfv
 -- =====================================================================
 CREATE OR REPLACE FUNCTION set_updated_at() RETURNS TRIGGER
 LANGUAGE plpgsql AS $$
