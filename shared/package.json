@@ -1,0 +1,10 @@
+{
+  "name": "@empflow/shared",
+  "version": "1.0.0",
+  "description": "EmpFlow shared types, schemas, and utilities used by backend, web, and mobile",
+  "private": true,
+  "main": "index.ts",
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
