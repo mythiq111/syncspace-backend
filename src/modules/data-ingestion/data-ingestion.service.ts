@@ -31,10 +31,10 @@ export class DataIngestionService {
 
       const [email, name, roleStr, baseSalaryStr] = parts;
       const role: UserRole = (roleStr as UserRole) || 'EMPLOYEE';
-      const baseSalary = parseFloat(baseSalaryStr) || 4000;
+      const baseSalary = parseFloat(baseSalaryStr) || 0;
 
       try {
-        await this.employeesService.inviteEmployee(tenantId, email, name, role, undefined, baseSalary);
+        await this.employeesService.inviteEmployee(tenantId, { email, name, role, baseSalary });
         count++;
       } catch (err: any) {
         errors.push(`Row ${i + 2}: ${err.message}`);

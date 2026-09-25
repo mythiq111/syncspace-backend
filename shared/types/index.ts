@@ -11,6 +11,9 @@ export interface Tenant {
   timezone: string;
 }
 
+export type EmploymentType = 'FULL_TIME' | 'PART_TIME' | 'CONTRACT' | 'INTERN';
+export type Gender = 'MALE' | 'FEMALE' | 'OTHER' | 'PREFER_NOT_TO_SAY';
+
 export interface User {
   id: string;
   tenantId: string; 
@@ -22,6 +25,27 @@ export interface User {
   allowances?: number;
   deductions?: number;
   annualLeaveBalance?: number;
+  employeeCode?: string;
+  phone?: string;
+  department?: string;
+  jobTitle?: string;
+  employmentType?: EmploymentType;
+  joiningDate?: string; // YYYY-MM-DD
+  workLocation?: string;
+  isActive?: boolean;
+}
+
+/** Sensitive details; readable only by the employee and HR/admins. */
+export interface EmployeePrivate {
+  dateOfBirth?: string;
+  gender?: Gender;
+  address?: string;
+  emergencyContactName?: string;
+  emergencyContactPhone?: string;
+  bankName?: string;
+  bankAccountNumber?: string;
+  bankIfsc?: string;
+  taxId?: string;
 }
 
 export type AttendanceStatus = 'PRESENT' | 'ANOMALY_MISSED_PUNCH' | 'REGULARIZED';

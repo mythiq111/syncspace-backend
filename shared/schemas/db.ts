@@ -1,6 +1,6 @@
 // shared/schemas/db.ts
 
-import { AttendanceStatus, LeaveStatus, LeaveType, UserRole } from '../types';
+import { AttendanceStatus, EmploymentType, Gender, LeaveStatus, LeaveType, UserRole } from '../types';
 
 export interface DatabaseTenantRow {
   id: string;
@@ -23,7 +23,29 @@ export interface DatabaseUserRow {
   allowances: number;
   deductions: number;
   annual_leave_balance: number;
+  employee_code: string | null;
+  phone: string | null;
+  department: string | null;
+  job_title: string | null;
+  employment_type: EmploymentType;
+  joining_date: string | null;
+  work_location: string | null;
+  is_active: boolean;
   created_at: string;
+}
+
+export interface DatabaseEmployeePrivateRow {
+  user_id: string;
+  tenant_id: string;
+  date_of_birth: string | null;
+  gender: Gender | null;
+  address: string | null;
+  emergency_contact_name: string | null;
+  emergency_contact_phone: string | null;
+  bank_name: string | null;
+  bank_account_number: string | null;
+  bank_ifsc: string | null;
+  tax_id: string | null;
 }
 
 export interface DatabaseAttendanceRow {

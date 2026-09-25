@@ -30,6 +30,14 @@ export const toUser = (r: DatabaseUserRow): User => ({
   allowances: Number(r.allowances),
   deductions: Number(r.deductions),
   annualLeaveBalance: r.annual_leave_balance,
+  employeeCode: r.employee_code ?? undefined,
+  phone: r.phone ?? undefined,
+  department: r.department ?? undefined,
+  jobTitle: r.job_title ?? undefined,
+  employmentType: r.employment_type,
+  joiningDate: r.joining_date ?? undefined,
+  workLocation: r.work_location ?? undefined,
+  isActive: r.is_active,
 });
 
 export const toAttendance = (r: DatabaseAttendanceRow): Attendance => ({

@@ -35,12 +35,16 @@ export class AuthGuard implements CanActivate {
 
     const { data: profile } = await this.supabase.client
       .from('users')
-      .select('id, tenant_id, role, email')
+      .select('id, tenant_id, role, email, is_active')
       .eq('id', auth.user.id)
       .maybeSingle();
 
     if (!profile) {
       throw new UnauthorizedException('No employee profile is linked to this account');
+    }
+
+    if (profile.is_active === false) {
+      throw new UnauthorizedException('This account has been deactivated');
     }
 
     request.user = {
