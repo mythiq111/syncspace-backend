@@ -75,6 +75,18 @@ export interface LeaveRequest {
   reason?: string;
   managerApproverId?: string;
   hrApproverId?: string;
+  createdAt?: string;
+}
+
+/** A leave request plus the people involved, so every viewer sees the full trail. */
+export interface LeaveRequestDetail extends LeaveRequest {
+  requesterName: string;
+  requesterEmail: string;
+  requesterRole: UserRole;
+  reportsToName?: string; // the requester's manager (who the request goes to)
+  managerApproverName?: string;
+  hrApproverName?: string;
+  rejectedByName?: string;
 }
 
 export interface Payslip {

@@ -6,10 +6,14 @@ import { DatabaseAttendanceRow } from '../../../shared/schemas/db';
 import { isWithinGeofence } from '../../../shared/utils/haversine';
 import { SupabaseService, unwrap } from '../../common/supabase/supabase.service';
 import { toAttendance } from '../../common/supabase/mappers';
+import { SettingsService } from '../../common/settings/settings.service';
 
 @Injectable()
 export class AttendanceService {
-  constructor(private readonly supabase: SupabaseService) {}
+  constructor(
+    private readonly supabase: SupabaseService,
+    private readonly settings: SettingsService
+  ) {}
 
   async clockIn(userId: string, tenantId: string, lat: number, lng: number, timestamp?: string): Promise<Attendance> {
     const { data: tenant, error: tenantError } = await this.supabase.client
@@ -19,8 +23,9 @@ export class AttendanceService {
       .maybeSingle();
     if (tenantError || !tenant) throw new NotFoundException('Organization not found');
 
+    const enforce = (await this.settings.get(tenantId)).geofence.enforce;
     const geofence = isWithinGeofence(lat, lng, tenant.office_lat, tenant.office_lng, tenant.radius);
-    if (!geofence.isInside) {
+    if (enforce && !geofence.isInside) {
       throw new ForbiddenException({
         code: 'ERR_OUT_OF_BOUNDS',
         message: `You must be within ${tenant.radius}m of the office. Current distance: ${geofence.distanceMeters}m`,

@@ -6,20 +6,27 @@ import { Payslip } from '../../../shared/types';
 import { DatabasePayslipRow } from '../../../shared/schemas/db';
 import { SupabaseService, unwrap } from '../../common/supabase/supabase.service';
 import { toPayslip } from '../../common/supabase/mappers';
+import { SettingsService } from '../../common/settings/settings.service';
+import { AuditService } from '../../common/audit/audit.service';
 
 @Injectable()
 export class PayrollService {
-  constructor(private readonly supabase: SupabaseService) {}
+  constructor(
+    private readonly supabase: SupabaseService,
+    private readonly settings: SettingsService,
+    private readonly audit: AuditService
+  ) {}
 
   async calculateUserPayroll(
     _userId: string,
-    _tenantId: string,
+    tenantId: string,
     baseSalary: number,
     allowances: number,
     deductions: number,
     unpaidLeaveDays: number
   ): Promise<PayrollCalculationOutput> {
-    return calculateMonthlyPayroll({ baseSalary, allowances, deductions, unpaidLeaveDays });
+    const { workingDaysPerMonth } = (await this.settings.get(tenantId)).payroll;
+    return calculateMonthlyPayroll({ baseSalary, allowances, deductions, unpaidLeaveDays, totalWorkingDaysInMonth: workingDaysPerMonth });
   }
 
   /** Calculates and saves one payslip per employee for `month` (YYYY-MM). Re-running a month updates it. */
@@ -30,8 +37,10 @@ export class PayrollService {
   ): Promise<Payslip[]> {
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new BadRequestException('month must be YYYY-MM');
 
+    const { workingDaysPerMonth } = (await this.settings.get(tenantId)).payroll;
     const rows = employees.map((emp) => {
       const calc = calculateMonthlyPayroll({
+        totalWorkingDaysInMonth: workingDaysPerMonth,
         baseSalary: emp.baseSalary,
         allowances: emp.allowances,
         deductions: emp.deductions,
@@ -58,7 +67,7 @@ export class PayrollService {
   }
 
   /** Builds payslips for every employee from their saved salary and approved unpaid leave in `month`. */
-  async runMonthlyPayroll(tenantId: string, month: string): Promise<Payslip[]> {
+  async runMonthlyPayroll(tenantId: string, month: string, actorId?: string): Promise<Payslip[]> {
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new BadRequestException('month must be YYYY-MM');
     const [year, mon] = month.split("-").map(Number);
     const monthStart = new Date(Date.UTC(year, mon - 1, 1));
@@ -91,7 +100,7 @@ export class PayrollService {
       unpaidDays.set(l.user_id, (unpaidDays.get(l.user_id) ?? 0) + days);
     }
 
-    return this.generateMonthlyBatchPayroll(
+    const result = await this.generateMonthlyBatchPayroll(
       tenantId,
       month,
       users.map((u) => ({
@@ -102,6 +111,8 @@ export class PayrollService {
         unpaidLeaveDays: unpaidDays.get(u.id) ?? 0,
       }))
     );
+    await this.audit.log(tenantId, actorId ?? null, 'payroll.run', 'payslip', undefined, { month, employees: result.length });
+    return result;
   }
 
   /** userId === 'all' returns every payslip in the tenant. */

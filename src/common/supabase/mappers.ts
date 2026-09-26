@@ -62,6 +62,7 @@ export const toLeave = (r: DatabaseLeaveRequestRow): LeaveRequest => ({
   reason: r.reason ?? undefined,
   managerApproverId: r.manager_approver_id ?? undefined,
   hrApproverId: r.hr_approver_id ?? undefined,
+  createdAt: r.created_at,
 });
 
 export const toPayslip = (r: DatabasePayslipRow): Payslip => ({

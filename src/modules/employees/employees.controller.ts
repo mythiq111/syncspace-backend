@@ -30,7 +30,7 @@ export class EmployeesController {
     @Req() req: { user: AuthenticatedUserContext },
     @Body() body: EmployeeInput
   ): Promise<ApiResponse<User>> {
-    const created = await this.employeesService.inviteEmployee(req.user.tenantId, body);
+    const created = await this.employeesService.inviteEmployee(req.user.tenantId, body, req.user.id);
     return { data: created };
   }
 

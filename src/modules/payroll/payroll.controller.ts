@@ -38,7 +38,7 @@ export class PayrollController {
   ): Promise<ApiResponse<any>> {
     const payslips = body.employees
       ? await this.payrollService.generateMonthlyBatchPayroll(req.user.tenantId, body.month, body.employees)
-      : await this.payrollService.runMonthlyPayroll(req.user.tenantId, body.month);
+      : await this.payrollService.runMonthlyPayroll(req.user.tenantId, body.month, req.user.id);
 
     return { data: payslips };
   }

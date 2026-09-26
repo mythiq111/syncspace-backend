@@ -2,6 +2,7 @@
 
 import { Module } from '@nestjs/common';
 import { SupabaseModule } from './common/supabase/supabase.module';
+import { CommonModule } from './common/common.module';
 import { AttendanceController } from './modules/attendance/attendance.controller';
 import { AttendanceService } from './modules/attendance/attendance.service';
 import { LeaveController } from './modules/leave/leave.controller';
@@ -19,7 +20,7 @@ import { ShiftClosureWorker } from './modules/jobs/shift-closure.worker';
 import { PdfPayslipWorker } from './modules/jobs/pdf-payslip.worker';
 
 @Module({
-  imports: [SupabaseModule],
+  imports: [SupabaseModule, CommonModule],
   controllers: [
     AttendanceController,
     LeaveController,

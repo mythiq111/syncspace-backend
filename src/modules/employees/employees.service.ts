@@ -5,6 +5,8 @@ import { EmployeePrivate, EmploymentType, Gender, User, UserRole } from '../../.
 import { DatabaseEmployeePrivateRow, DatabaseUserRow } from '../../../shared/schemas/db';
 import { SupabaseService, unwrap } from '../../common/supabase/supabase.service';
 import { toUser } from '../../common/supabase/mappers';
+import { SettingsService } from '../../common/settings/settings.service';
+import { AuditService } from '../../common/audit/audit.service';
 
 const ASSIGNABLE_ROLES: UserRole[] = ['EMPLOYEE', 'LINE_MANAGER', 'HR_MANAGER', 'TENANT_ADMIN'];
 const EMPLOYMENT_TYPES: EmploymentType[] = ['FULL_TIME', 'PART_TIME', 'CONTRACT', 'INTERN'];
@@ -37,7 +39,11 @@ const clean = (v?: string | null) => (v === undefined ? undefined : v === null |
 
 @Injectable()
 export class EmployeesService {
-  constructor(private readonly supabase: SupabaseService) {}
+  constructor(
+    private readonly supabase: SupabaseService,
+    private readonly settings: SettingsService,
+    private readonly audit: AuditService
+  ) {}
 
   async getEmployeesByTenant(tenantId: string): Promise<User[]> {
     const rows = unwrap(
@@ -59,15 +65,21 @@ export class EmployeesService {
   }
 
   /** Creates the login and the employee record (plus private details when given). */
-  async inviteEmployee(tenantId: string, input: EmployeeInput): Promise<User> {
+  async inviteEmployee(tenantId: string, input: EmployeeInput, actorId?: string): Promise<User> {
     const email = input.email?.trim().toLowerCase();
     const name = input.name?.trim();
     if (!name) throw new BadRequestException('Name is required');
     if (!email || !EMAIL_RE.test(email)) throw new BadRequestException('A valid email is required');
     const role = input.role ?? 'EMPLOYEE';
     this.validate(input, role);
-    if (input.password !== undefined && input.password.length < 6) {
-      throw new BadRequestException('Password must be at least 6 characters');
+    const company = await this.settings.get(tenantId);
+    const allowedDomains = company.security.allowedEmailDomains.split(',').map((d) => d.trim().toLowerCase()).filter(Boolean);
+    if (allowedDomains.length && !allowedDomains.includes(email.split('@')[1])) {
+      throw new BadRequestException(`Email must use one of the company domains: ${allowedDomains.join(', ')}`);
+    }
+    const minPassword = company.security.minPasswordLength;
+    if (input.password !== undefined && input.password.length < minPassword) {
+      throw new BadRequestException(`Password must be at least ${minPassword} characters`);
     }
 
     // With a password the admin hands over credentials directly; without one Supabase emails an invite.
@@ -93,7 +105,7 @@ export class EmployeesService {
           base_salary: input.baseSalary ?? 0,
           allowances: input.allowances ?? 0,
           deductions: input.deductions ?? 0,
-          ...(input.annualLeaveBalance !== undefined && { annual_leave_balance: input.annualLeaveBalance }),
+          annual_leave_balance: input.annualLeaveBalance ?? company.leave.annualLeaveDays,
           employee_code: code,
           phone: clean(input.phone) ?? null,
           department: clean(input.department) ?? null,
@@ -107,6 +119,7 @@ export class EmployeesService {
       if (error) throw new BadRequestException(this.friendly(error.message));
 
       await this.savePrivate(userId, tenantId, input);
+      await this.audit.log(tenantId, actorId ?? null, 'employee.created', 'user', userId, { name, email, role });
       return toUser(data as DatabaseUserRow);
     } catch (err) {
       await this.supabase.client.auth.admin.deleteUser(userId); // roll back the orphan login (cascades)
@@ -148,6 +161,8 @@ export class EmployeesService {
       await this.supabase.client.auth.admin.updateUserById(id, { ban_duration: input.isActive ? 'none' : '876000h' });
     }
     await this.savePrivate(id, tenantId, input);
+    const changed = Object.keys(input).filter((k) => (input as Record<string, unknown>)[k] !== undefined);
+    await this.audit.log(tenantId, actorId ?? null, input.isActive === false ? 'employee.deactivated' : input.isActive === true ? 'employee.reactivated' : 'employee.updated', 'user', id, { fields: changed });
     return this.getEmployeeById(id, tenantId);
   }
 
